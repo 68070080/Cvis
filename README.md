@@ -35,6 +35,44 @@ code and confirm it. Required environment variables (see `.env.example`):
 | `RESEND_API_KEY`, `RESEND_FROM` | resend.com API key, and a sender address/domain verified there |
 | `AUTH_SECRET` | Random 32+ character secret used to sign the OTP cookie |
 
+## Sender domain (Resend)
+
+Until a domain is verified in Resend, the account may only mail its own address.
+The Resend account behind this project was created with
+**68070080@kmitl.ac.th**, and `RESEND_FROM` is still the shared test sender
+`Cvis <onboarding@resend.dev>`. Resend therefore accepts a code only when it is
+sent to `68070080@kmitl.ac.th`; every other address fails with
+`403` ("You can only send testing emails to your own email address …"), which
+`/api/auth/otp/send` reports as `502`. In practice only that one address can
+create an account today.
+
+To mail real users, verify a domain and send from it:
+
+1. Open resend.com → **Domains** → **Add Domain** and enter a domain you own.
+2. Add the DNS records Resend shows (SPF `TXT`/`MX`, `DKIM` `TXT`, and the
+   `DMARC` record) at your DNS provider.
+3. Wait for the domain to show **Verified** in Resend.
+4. In the Vercel project `cvis-68070080` → **Settings → Environment Variables**,
+   change `RESEND_FROM` to an address on that domain, e.g.
+   `Cvis <noreply@yourdomain.com>`, for Production, Preview and Development.
+5. Redeploy so the functions pick up the new value — an empty commit pushed to
+   `main` is enough:
+   ```sh
+   git commit --allow-empty -m "Send OTP mail from the verified domain"
+   git push origin main
+   ```
+6. Check with a real address:
+   ```sh
+   curl -i -X POST https://cvis-68070080.vercel.app/api/auth/otp/send \
+     -H 'Content-Type: application/json' -d '{"email":"you@example.com"}'
+   ```
+   A `200 {"ok":true,…}` and an entry in resend.com → **Emails** means the sender
+   domain is accepted. Resend still rejects a `422` for placeholder domains such
+   as `example.com`, so test with a mailbox that exists.
+
+`RESEND_API_KEY` itself needs nothing beyond **Sending access**; a restricted key
+that is scoped to one domain also stops working if `RESEND_FROM` uses another.
+
 ## Deploy
 
 The Vercel project `cvis-68070080` is connected to this repository, so a push
