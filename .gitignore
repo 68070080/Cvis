@@ -9,3 +9,8 @@ dist/
 # Freebuff / chat internals
 .freebuff/
 .cloud-attachments/
+
+.vercel
+
+# Vercel deploy token (local only)
+.vercel-token
