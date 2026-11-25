@@ -18,12 +18,17 @@ const FIELDS: { key: keyof Theme; label: string; hint: string }[] = [
 export function SettingsView({
   data,
   session,
+  accountEmail,
+  onSignOut,
   onSave,
   onRestore,
   busy,
 }: {
   data: AppData
   session: Session
+  /** Google account used to sign in. */
+  accountEmail: string
+  onSignOut: () => void
   onSave: (input: SettingsInput) => Promise<void>
   onRestore: (text: string) => Promise<void>
   busy: boolean
@@ -131,11 +136,7 @@ export function SettingsView({
         </div>
         <div className="grow">
           <h1>ตั้งค่า</h1>
-          <p className="muted small">
-            {session.mode === 'local'
-              ? 'โหมดทดลองในเครื่อง'
-              : session.user?.email || 'สมาชิกฟรี'}
-          </p>
+          <p className="muted small">{accountEmail || 'โหมดทดลองในเครื่อง'}</p>
         </div>
       </section>
 
@@ -275,13 +276,11 @@ export function SettingsView({
         {busy ? 'กำลังบันทึก…' : dirty ? 'บันทึกการตั้งค่า' : 'บันทึกแล้ว'}
       </button>
 
-      {session.mode === 'freebuff' && (
-        <form method="post" action="/auth/freebuff/signout" className="signout">
-          <button type="submit" className="ghost wide">
-            ออกจากระบบ
-          </button>
-        </form>
-      )}
+      <div className="signout">
+        <button type="button" className="ghost wide" onClick={onSignOut}>
+          ออกจากระบบ
+        </button>
+      </div>
     </form>
   )
 }

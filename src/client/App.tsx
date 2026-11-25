@@ -7,11 +7,18 @@ import type {
   TransactionInput,
 } from '../shared/types'
 import { api, jsonRequest } from './api'
+import {
+  authSession,
+  signOut as endSession,
+  type AuthState,
+  type AuthUser,
+} from './auth'
 import { importBackup } from './backup'
 import { BudgetsView } from './BudgetsView'
 import { currentMonth } from './format'
 import { FitnessModule } from './FitnessModule'
 import { HealthModule } from './HealthModule'
+import { LoginView } from './LoginView'
 import { ReportView } from './ReportView'
 import { TimeModule } from './TimeModule'
 import { SettingsView } from './SettingsView'
@@ -73,6 +80,7 @@ export function App() {
   const [showSettings, setShowSettings] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const [auth, setAuth] = useState<AuthState | null>(null)
   const modulesRef = useRef<HTMLDivElement>(null)
 
   // Five module buttons scroll on narrow phones: keep the active one visible.
@@ -80,6 +88,25 @@ export function App() {
     const active = modulesRef.current?.querySelector('button.active')
     active?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
   }, [mod, showSettings])
+
+  // Google sign-in plus a one-time code from e-mail are both required.
+  useEffect(() => {
+    let live = true
+    void (async () => {
+      try {
+        const current = await authSession()
+        if (live) setAuth(current)
+      } catch (problem) {
+        if (live) {
+          setError(message(problem))
+          setAuth({ authenticated: false, pending: null })
+        }
+      }
+    })()
+    return () => {
+      live = false
+    }
+  }, [])
 
   const ready = Boolean(session?.user && session.database)
 
@@ -151,6 +178,19 @@ export function App() {
     await load(month)
   }
 
+  const handleSignOut = () => {
+    void (async () => {
+      try {
+        await endSession()
+      } catch {
+        // Even if the call fails, drop the local view of the session.
+      } finally {
+        setShowSettings(false)
+        setAuth({ authenticated: false, pending: null })
+      }
+    })()
+  }
+
   return (
     <div className="app">
       {error && (
@@ -167,7 +207,16 @@ export function App() {
         </p>
       )}
 
-      {!session ? (
+      {!auth ? (
+        <p className="empty">กำลังโหลด…</p>
+      ) : !auth.authenticated ? (
+        <LoginView
+          state={auth}
+          onVerified={(user: AuthUser) =>
+            setAuth({ authenticated: true, user })
+          }
+        />
+      ) : !session ? (
         <p className="empty">กำลังโหลด…</p>
       ) : !ready ? (
         <section className="card setup">
@@ -234,6 +283,8 @@ export function App() {
                 data={data}
                 session={session}
                 busy={busy}
+                accountEmail={auth.user?.email ?? ''}
+                onSignOut={handleSignOut}
                 onSave={saveSettings}
                 onRestore={restore}
               />

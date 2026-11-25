@@ -1,4 +1,10 @@
 import react from '@vitejs/plugin-react'
 import { defineConfig } from 'vite'
 
-export default defineConfig({ plugins: [react()] })
+export default defineConfig({
+  plugins: [react()],
+  server: {
+    // The auth endpoints live in ./api and are served by scripts/dev-api.mjs.
+    proxy: { '/api': 'http://127.0.0.1:3001' },
+  },
+})
