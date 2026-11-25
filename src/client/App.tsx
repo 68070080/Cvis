@@ -6,13 +6,9 @@ import type {
   SettingsInput,
   TransactionInput,
 } from '../shared/types'
+import { readAccount, type LocalAccount } from './account'
 import { api, jsonRequest } from './api'
-import {
-  authSession,
-  signOut as endSession,
-  type AuthState,
-  type AuthUser,
-} from './auth'
+import type { AuthUser } from './auth'
 import { importBackup } from './backup'
 import { BudgetsView } from './BudgetsView'
 import { currentMonth } from './format'
@@ -80,7 +76,11 @@ export function App() {
   const [showSettings, setShowSettings] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
-  const [auth, setAuth] = useState<AuthState | null>(null)
+  // The account lives in IndexedDB; `undefined` means it is still loading.
+  const [account, setAccount] = useState<LocalAccount | null | undefined>(
+    undefined,
+  )
+  const [user, setUser] = useState<AuthUser | null>(null)
   const modulesRef = useRef<HTMLDivElement>(null)
 
   // Five module buttons scroll on narrow phones: keep the active one visible.
@@ -89,20 +89,18 @@ export function App() {
     active?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
   }, [mod, showSettings])
 
-  // Google sign-in plus a one-time code from e-mail are both required.
+  // A password sign-in is required on every load of the app.
   useEffect(() => {
     let live = true
-    void (async () => {
-      try {
-        const current = await authSession()
-        if (live) setAuth(current)
-      } catch (problem) {
-        if (live) {
-          setError(message(problem))
-          setAuth({ authenticated: false, pending: null })
-        }
-      }
-    })()
+    void readAccount()
+      .then((value) => {
+        if (live) setAccount(value)
+      })
+      .catch((problem) => {
+        if (!live) return
+        setError(message(problem))
+        setAccount(null)
+      })
     return () => {
       live = false
     }
@@ -178,17 +176,17 @@ export function App() {
     await load(month)
   }
 
+  const handleSignedIn = (next: AuthUser) => {
+    setUser(next)
+    // Signing up creates the local account, so re-read it for the next lock.
+    void readAccount()
+      .then(setAccount)
+      .catch(() => undefined)
+  }
+
   const handleSignOut = () => {
-    void (async () => {
-      try {
-        await endSession()
-      } catch {
-        // Even if the call fails, drop the local view of the session.
-      } finally {
-        setShowSettings(false)
-        setAuth({ authenticated: false, pending: null })
-      }
-    })()
+    setShowSettings(false)
+    setUser(null)
   }
 
   return (
@@ -207,15 +205,10 @@ export function App() {
         </p>
       )}
 
-      {!auth ? (
+      {account === undefined ? (
         <p className="empty">กำลังโหลด…</p>
-      ) : !auth.authenticated ? (
-        <LoginView
-          state={auth}
-          onVerified={(user: AuthUser) =>
-            setAuth({ authenticated: true, user })
-          }
-        />
+      ) : !user ? (
+        <LoginView account={account} onSignedIn={handleSignedIn} />
       ) : !session ? (
         <p className="empty">กำลังโหลด…</p>
       ) : !ready ? (
@@ -283,7 +276,7 @@ export function App() {
                 data={data}
                 session={session}
                 busy={busy}
-                accountEmail={auth.user?.email ?? ''}
+                accountEmail={user.email}
                 onSignOut={handleSignOut}
                 onSave={saveSettings}
                 onRestore={restore}

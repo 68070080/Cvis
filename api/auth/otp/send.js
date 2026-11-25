@@ -1,8 +1,8 @@
 import {
   CHALLENGE_COOKIE,
   OTP_TTL,
-  PENDING_COOKIE,
   RESEND_GAP,
+  body,
   cookies,
   issueToken,
   json,
@@ -15,22 +15,25 @@ import {
 } from '../../_lib/auth.js'
 import { sendOtp } from '../../_lib/mail.js'
 
-/** Step 3: e-mails a fresh 6-digit code for the pending Google account. */
+const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/
+
+/** E-mails a fresh 6-digit code to the address being signed up or reset. */
 export default async function handler(req, res) {
   if (req.method !== 'POST') return methodNotAllowed(res, 'POST')
   if (!secretReady()) {
     return json(res, 500, { error: 'ยังไม่ได้ตั้งค่า AUTH_SECRET ใน environment' })
   }
 
-  const jar = cookies(req)
-  const pending = readToken(jar.get(PENDING_COOKIE))
-  if (!pending?.email) {
-    return json(res, 401, { error: 'กรุณาเข้าสู่ระบบด้วย Google ก่อนขอรหัส OTP' })
+  const payload = await body(req)
+  const email = String(payload?.email ?? '').trim().toLowerCase()
+  if (!EMAIL.test(email)) {
+    return json(res, 400, { error: 'กรุณากรอกอีเมลให้ถูกต้อง' })
   }
 
+  const jar = cookies(req)
   const previous = readToken(jar.get(CHALLENGE_COOKIE))
   const sentAt = Number(previous?.sentAt || 0)
-  if (previous?.email === pending.email && Date.now() - sentAt < RESEND_GAP) {
+  if (previous?.email === email && Date.now() - sentAt < RESEND_GAP) {
     const wait = Math.ceil((RESEND_GAP - (Date.now() - sentAt)) / 1000)
     return json(res, 429, { error: `ขอรหัสใหม่ได้ในอีก ${wait} วินาที` })
   }
@@ -42,7 +45,7 @@ export default async function handler(req, res) {
 
   if (!dev || process.env.RESEND_API_KEY) {
     try {
-      await sendOtp(pending.email, code, pending.name || '')
+      await sendOtp(email, code)
     } catch (error) {
       console.error('otp mail failed', error)
       return json(res, 502, {
@@ -58,9 +61,8 @@ export default async function handler(req, res) {
     res,
     CHALLENGE_COOKIE,
     issueToken({
-      email: pending.email,
-      name: pending.name || '',
-      otp: otpDigest(pending.email, code),
+      email,
+      otp: otpDigest(email, code),
       exp: now + OTP_TTL,
       sentAt: now,
       tries: 0,
@@ -70,7 +72,7 @@ export default async function handler(req, res) {
 
   return json(res, 200, {
     ok: true,
-    email: pending.email,
+    email,
     expiresInSec: OTP_TTL / 1000,
     ...(dev ? { devCode: code } : {}),
   })

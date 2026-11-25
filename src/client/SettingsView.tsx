@@ -26,7 +26,7 @@ export function SettingsView({
 }: {
   data: AppData
   session: Session
-  /** Google account used to sign in. */
+  /** E-mail of the signed-in account. */
   accountEmail: string
   onSignOut: () => void
   onSave: (input: SettingsInput) => Promise<void>

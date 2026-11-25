@@ -1,36 +1,38 @@
-import { useEffect, useRef, useState } from 'react'
-import { sendOtp, signOut, verifyOtp, type AuthState, type AuthUser } from './auth'
+import { useEffect, useState } from 'react'
+import {
+  MIN_PASSWORD,
+  isEmail,
+  normalizeEmail,
+  passwordMatches,
+  saveAccount,
+  type LocalAccount,
+} from './account'
+import { sendOtp, verifyOtp, type AuthUser } from './auth'
 
 const seconds = (value: number) => `${value} วินาที`
 
+/** Sign-up (e-mail + password, confirmed by OTP) or sign-in with the password. */
 export function LoginView({
-  state,
-  onVerified,
+  account,
+  onSignedIn,
 }: {
-  state: AuthState
-  onVerified: (user: AuthUser) => void
+  account: LocalAccount | null
+  onSignedIn: (user: AuthUser) => void
 }) {
-  const pendingEmail = state.pending?.email ?? ''
-  const [step, setStep] = useState<'google' | 'code'>(
-    pendingEmail ? 'code' : 'google',
+  const [step, setStep] = useState<'login' | 'signup' | 'code' | 'reset'>(
+    account ? 'login' : 'signup',
   )
+  const [email, setEmail] = useState(account?.email ?? '')
+  const [password, setPassword] = useState('')
+  const [confirm, setConfirm] = useState('')
   const [code, setCode] = useState('')
   const [devCode, setDevCode] = useState('')
   const [note, setNote] = useState('')
-  const [error, setError] = useState(() => {
-    const params = new URLSearchParams(window.location.search)
-    return params.get('error') || ''
-  })
+  const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const [cooldown, setCooldown] = useState(0)
-  const requested = useRef(false)
-
-  // Keep the URL clean once the message has been read.
-  useEffect(() => {
-    if (window.location.search) {
-      window.history.replaceState(null, '', window.location.pathname)
-    }
-  }, [])
+  /** What to finish once the code from the e-mail is accepted. */
+  const [intent, setIntent] = useState<'signup' | 'reset'>('signup')
 
   useEffect(() => {
     if (cooldown <= 0) return
@@ -41,57 +43,125 @@ export function LoginView({
     return () => window.clearInterval(timer)
   }, [cooldown])
 
-  async function request() {
-    if (busy || !pendingEmail) return
+  function passwordProblem(): string {
+    if (password.length < MIN_PASSWORD) {
+      return `รหัสผ่านต้องมีอย่างน้อย ${MIN_PASSWORD} ตัวอักษร`
+    }
+    if (password !== confirm) return 'รหัสผ่านทั้งสองช่องไม่ตรงกัน'
+    return ''
+  }
+
+  async function requestCode(address: string): Promise<boolean> {
     setBusy(true)
     setError('')
     try {
-      const result = await sendOtp()
+      const result = await sendOtp(address)
       setDevCode(result.devCode ?? '')
       setNote(`ส่งรหัส 6 หลักไปที่ ${result.email} แล้ว ใช้ได้ 5 นาที`)
       setCooldown(30)
+      return true
     } catch (problem) {
       setError(problem instanceof Error ? problem.message : 'ขอรหัสไม่สำเร็จ')
+      return false
     } finally {
       setBusy(false)
     }
   }
 
-  // Coming back from Google: send the code straight away.
-  useEffect(() => {
-    if (step !== 'code' || requested.current) return
-    requested.current = true
-    void request()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [step])
+  async function startVerification(next: 'signup' | 'reset') {
+    const address = normalizeEmail(email)
+    if (!isEmail(address)) return setError('กรุณากรอกอีเมลให้ถูกต้อง')
+    const problem = passwordProblem()
+    if (problem) return setError(problem)
+    setIntent(next)
+    if (await requestCode(address)) setStep('code')
+  }
 
-  async function submit(event: React.FormEvent) {
+  async function signIn(event: React.FormEvent) {
+    event.preventDefault()
+    if (!account) return
+    if (normalizeEmail(email) !== account.email) {
+      return setError('อีเมลนี้ไม่ตรงกับบัญชีที่สร้างไว้ในเครื่องนี้')
+    }
+    setBusy(true)
+    setError('')
+    try {
+      if (!(await passwordMatches(account, password))) {
+        return setError('รหัสผ่านไม่ถูกต้อง')
+      }
+      onSignedIn({ email: account.email })
+    } catch (problem) {
+      setError(problem instanceof Error ? problem.message : 'เข้าสู่ระบบไม่สำเร็จ')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function confirmCode(event: React.FormEvent) {
     event.preventDefault()
     if (!/^\d{6}$/.test(code)) return setError('กรอกรหัส OTP 6 หลัก')
     setBusy(true)
     setError('')
     try {
       const result = await verifyOtp(code)
-      onVerified(result.user)
+      const saved = await saveAccount(result.email, password)
+      onSignedIn({ email: saved.email })
     } catch (problem) {
-      setError(
-        problem instanceof Error ? problem.message : 'ยืนยันรหัสไม่สำเร็จ',
-      )
+      setError(problem instanceof Error ? problem.message : 'ยืนยันรหัสไม่สำเร็จ')
     } finally {
       setBusy(false)
     }
   }
 
-  async function restart() {
-    setBusy(true)
-    try {
-      await signOut()
-    } catch {
-      // A failed sign-out still means the browser can start over.
-    } finally {
-      window.location.assign('/')
-    }
+  const back = (next: 'login' | 'signup' | 'reset') => {
+    setError('')
+    setNote('')
+    setDevCode('')
+    setCode('')
+    setPassword('')
+    setConfirm('')
+    setStep(next)
   }
+
+  const addressFields = (autocomplete: string) => (
+    <>
+      <div className="field">
+        <label htmlFor="account-email">อีเมล</label>
+        <input
+          id="account-email"
+          type="email"
+          inputMode="email"
+          autoComplete={autocomplete}
+          autoCapitalize="none"
+          spellCheck={false}
+          value={email}
+          placeholder="you@example.com"
+          onChange={(event) => setEmail(event.target.value)}
+        />
+      </div>
+      <div className="field">
+        <label htmlFor="account-password">รหัสผ่าน</label>
+        <input
+          id="account-password"
+          type="password"
+          autoComplete="new-password"
+          value={password}
+          placeholder={`อย่างน้อย ${MIN_PASSWORD} ตัวอักษร`}
+          onChange={(event) => setPassword(event.target.value)}
+        />
+      </div>
+      <div className="field">
+        <label htmlFor="account-confirm">ยืนยันรหัสผ่าน</label>
+        <input
+          id="account-confirm"
+          type="password"
+          autoComplete="new-password"
+          value={confirm}
+          onChange={(event) => setConfirm(event.target.value)}
+        />
+      </div>
+    </>
+  )
 
   return (
     <section className="login">
@@ -111,25 +181,90 @@ export function LoginView({
         </p>
       )}
 
-      {step === 'google' ? (
-        <div className="card">
+      {step === 'login' && account && (
+        <form className="card" onSubmit={signIn}>
           <h2>เข้าสู่ระบบ</h2>
           <p className="muted small">
-            ใช้อีเมล Google แล้วยืนยันอีกขั้นด้วยรหัส OTP ที่ส่งไปยังอีเมลของคุณ
+            บัญชีในเครื่องนี้: <strong>{account.email}</strong>
           </p>
-          <a className="primary wide googlebtn" href="/api/auth/google/start">
-            <span className="googlemark" aria-hidden="true">
-              G
-            </span>
-            ดำเนินการต่อด้วย Google
-          </a>
-        </div>
-      ) : (
-        <form className="card" onSubmit={submit}>
-          <h2>ยืนยันตัวตนด้วย OTP</h2>
+          <div className="field">
+            <label htmlFor="login-email">อีเมล</label>
+            <input
+              id="login-email"
+              type="email"
+              inputMode="email"
+              autoComplete="username"
+              autoCapitalize="none"
+              spellCheck={false}
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+            />
+          </div>
+          <div className="field">
+            <label htmlFor="login-password">รหัสผ่าน</label>
+            <input
+              id="login-password"
+              type="password"
+              autoComplete="current-password"
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+            />
+          </div>
+          <button type="submit" className="primary wide" disabled={busy}>
+            {busy ? 'กำลังตรวจสอบ…' : 'เข้าสู่ระบบ'}
+          </button>
+          <div className="loginlinks">
+            <button
+              type="button"
+              className="linkbtn"
+              disabled={busy}
+              onClick={() => back('reset')}
+            >
+              ลืมรหัสผ่าน?
+            </button>
+          </div>
+        </form>
+      )}
+
+      {(step === 'signup' || step === 'reset') && (
+        <form
+          className="card"
+          onSubmit={(event) => {
+            event.preventDefault()
+            void startVerification(step === 'reset' ? 'reset' : 'signup')
+          }}
+        >
+          <h2>{step === 'reset' ? 'ตั้งรหัสผ่านใหม่' : 'สร้างบัญชี'}</h2>
           <p className="muted small">
-            รหัส 6 หลักส่งไปที่ <strong>{pendingEmail}</strong> — ใช้ได้ 5 นาที
-            และใช้ได้ครั้งเดียว
+            {step === 'reset'
+              ? 'ยืนยันอีเมลด้วยรหัส OTP แล้วตั้งรหัสผ่านใหม่สำหรับบัญชีในเครื่องนี้'
+              : 'สมัครด้วยอีเมลและรหัสผ่าน แล้วยืนยันอีเมลด้วยรหัส OTP ที่ส่งไปให้'}
+          </p>
+          {addressFields(step === 'reset' ? 'username' : 'email')}
+          <button type="submit" className="primary wide" disabled={busy}>
+            {busy ? 'กำลังส่งรหัส…' : 'รับรหัส OTP'}
+          </button>
+          <div className="loginlinks">
+            {account && (
+              <button
+                type="button"
+                className="linkbtn"
+                disabled={busy}
+                onClick={() => back('login')}
+              >
+                กลับไปเข้าสู่ระบบ
+              </button>
+            )}
+          </div>
+        </form>
+      )}
+
+      {step === 'code' && (
+        <form className="card" onSubmit={confirmCode}>
+          <h2>ยืนยันอีเมลด้วย OTP</h2>
+          <p className="muted small">
+            รหัส 6 หลักส่งไปที่ <strong>{normalizeEmail(email)}</strong> —
+            ใช้ได้ 5 นาที และใช้ได้ครั้งเดียว
           </p>
           <div className="field">
             <label htmlFor="otp-code">รหัส OTP</label>
@@ -161,14 +296,18 @@ export function LoginView({
             className="primary wide"
             disabled={busy || code.length !== 6}
           >
-            {busy ? 'กำลังตรวจสอบ…' : 'ยืนยันรหัส'}
+            {busy
+              ? 'กำลังตรวจสอบ…'
+              : intent === 'reset'
+                ? 'ยืนยันและตั้งรหัสใหม่'
+                : 'ยืนยันและสร้างบัญชี'}
           </button>
           <div className="loginlinks">
             <button
               type="button"
               className="linkbtn"
               disabled={busy || cooldown > 0}
-              onClick={request}
+              onClick={() => void requestCode(normalizeEmail(email))}
             >
               {cooldown > 0 ? `ส่งอีกครั้งใน ${seconds(cooldown)}` : 'ส่งรหัสอีกครั้ง'}
             </button>
@@ -176,9 +315,9 @@ export function LoginView({
               type="button"
               className="linkbtn"
               disabled={busy}
-              onClick={restart}
+              onClick={() => back(intent === 'reset' ? 'reset' : 'signup')}
             >
-              ใช้บัญชีอื่น
+              แก้อีเมล
             </button>
           </div>
         </form>

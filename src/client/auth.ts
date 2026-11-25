@@ -1,11 +1,5 @@
 /** Talks to the small auth API in /api/auth (Vercel functions). */
-export type AuthUser = { email: string; name?: string }
-
-export type AuthState = {
-  authenticated: boolean
-  user?: AuthUser
-  pending?: { email: string } | null
-}
+export type AuthUser = { email: string }
 
 export type OtpSent = {
   ok: true
@@ -14,6 +8,8 @@ export type OtpSent = {
   /** Only present when the local dev API server runs without Resend. */
   devCode?: string
 }
+
+export type OtpVerified = { verified: true; email: string }
 
 function parse(text: string): Record<string, unknown> {
   try {
@@ -49,16 +45,14 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
   return payload as T
 }
 
-export const authSession = () => call<AuthState>('/api/auth/session')
-
-export const sendOtp = () =>
-  call<OtpSent>('/api/auth/otp/send', { method: 'POST' })
+export const sendOtp = (email: string) =>
+  call<OtpSent>('/api/auth/otp/send', {
+    method: 'POST',
+    body: JSON.stringify({ email }),
+  })
 
 export const verifyOtp = (code: string) =>
-  call<{ authenticated: true; user: AuthUser }>('/api/auth/otp/verify', {
+  call<OtpVerified>('/api/auth/otp/verify', {
     method: 'POST',
     body: JSON.stringify({ code }),
   })
-
-export const signOut = () =>
-  call<{ authenticated: false }>('/api/auth/logout', { method: 'POST' })

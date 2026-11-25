@@ -2097,7 +2097,7 @@ input[type='range'] {
   font-weight: 600;
 }
 
-/* ---------- login (Google + OTP) ---------- */
+/* ---------- login (account + OTP) ---------- */
 .login {
   display: grid;
   gap: 12px;
@@ -2121,29 +2121,6 @@ input[type='range'] {
   background: var(--accent);
   color: #fff;
   font-size: 24px;
-  font-weight: 700;
-}
-
-.primary.googlebtn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-  margin-top: 14px;
-  background: #fff;
-  color: var(--text);
-  border: 1.5px solid var(--line);
-}
-
-.googlemark {
-  width: 24px;
-  height: 24px;
-  border-radius: 50%;
-  background: var(--accent);
-  color: #fff;
-  display: grid;
-  place-items: center;
-  font-size: 13px;
   font-weight: 700;
 }
 

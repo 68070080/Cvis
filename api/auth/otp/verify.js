@@ -1,9 +1,6 @@
 import {
   CHALLENGE_COOKIE,
   MAX_TRIES,
-  PENDING_COOKIE,
-  SESSION_COOKIE,
-  SESSION_TTL,
   body,
   clearCookie,
   cookies,
@@ -17,7 +14,7 @@ import {
   setCookie,
 } from '../../_lib/auth.js'
 
-/** Step 4: checks the code and issues the 12-hour session cookie. */
+/** Checks the code, then tells the app the address is confirmed. */
 export default async function handler(req, res) {
   if (req.method !== 'POST') return methodNotAllowed(res, 'POST')
   if (!secretReady()) {
@@ -34,19 +31,15 @@ export default async function handler(req, res) {
   const challenge = readToken(jar.get(CHALLENGE_COOKIE))
   if (!challenge?.email || !challenge?.otp) {
     clearCookie(req, res, CHALLENGE_COOKIE)
-    clearCookie(req, res, PENDING_COOKIE)
-    return json(res, 400, {
-      error: 'รหัสหมดอายุแล้ว กรุณาเข้าสู่ระบบด้วย Google ใหม่',
-    })
+    return json(res, 400, { error: 'รหัสหมดอายุแล้ว กรุณาขอรหัสใหม่' })
   }
 
   const tries = Number(challenge.tries || 0) + 1
   if (!sameDigest(otpDigest(challenge.email, code), challenge.otp)) {
     if (tries >= MAX_TRIES) {
       clearCookie(req, res, CHALLENGE_COOKIE)
-      clearCookie(req, res, PENDING_COOKIE)
       return json(res, 429, {
-        error: 'กรอกรหัสผิดหลายครั้งเกินไป กรุณาเริ่มเข้าสู่ระบบใหม่',
+        error: 'กรอกรหัสผิดหลายครั้งเกินไป กรุณาขอรหัสใหม่',
       })
     }
     setCookie(
@@ -62,14 +55,5 @@ export default async function handler(req, res) {
   }
 
   clearCookie(req, res, CHALLENGE_COOKIE)
-  clearCookie(req, res, PENDING_COOKIE)
-  const user = { email: challenge.email, name: challenge.name || '' }
-  setCookie(
-    req,
-    res,
-    SESSION_COOKIE,
-    issueToken({ ...user, exp: Date.now() + SESSION_TTL }),
-    SESSION_TTL,
-  )
-  return json(res, 200, { authenticated: true, user })
+  return json(res, 200, { verified: true, email: challenge.email })
 }

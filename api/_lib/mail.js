@@ -1,11 +1,11 @@
-/** Sends the login code through Resend's REST API. */
+/** Sends the e-mail verification code through Resend's REST API. */
 export async function sendOtp(email, code, name = '') {
   const key = String(process.env.RESEND_API_KEY || '')
   if (!key) throw new Error('ยังไม่ได้ตั้งค่า RESEND_API_KEY')
 
   const from = String(process.env.RESEND_FROM || 'Cvis <onboarding@resend.dev>')
   const greeting = name ? `สวัสดี ${name}` : 'สวัสดี'
-  const text = `${greeting}\n\nรหัสยืนยันตัวตน Cvis ของคุณคือ ${code}\nรหัสนี้ใช้ได้ 5 นาที และใช้ได้ครั้งเดียว\n\nหากคุณไม่ได้พยายามเข้าสู่ระบบ ไม่ต้องทำอะไรกับอีเมลนี้`
+  const text = `${greeting}\n\nรหัสยืนยันอีเมลสำหรับบัญชี Cvis ของคุณคือ ${code}\nรหัสนี้ใช้ได้ 5 นาที และใช้ได้ครั้งเดียว\n\nหากคุณไม่ได้เป็นผู้ขอรหัสนี้ ไม่ต้องทำอะไรกับอีเมลนี้`
 
   const response = await fetch('https://api.resend.com/emails', {
     method: 'POST',
@@ -20,9 +20,9 @@ export async function sendOtp(email, code, name = '') {
       text,
       html: `<div style="font-family:'Noto Sans Thai',system-ui,sans-serif;line-height:1.6;color:#152a3d">
   <p>${greeting}</p>
-  <p>รหัสยืนยันตัวตน Cvis ของคุณคือ</p>
+  <p>รหัสยืนยันอีเมลสำหรับบัญชี Cvis ของคุณคือ</p>
   <p style="font-size:32px;font-weight:700;letter-spacing:8px;color:#17808d">${code}</p>
-  <p style="color:#62798a">รหัสนี้ใช้ได้ 5 นาที และใช้ได้ครั้งเดียว หากคุณไม่ได้พยายามเข้าสู่ระบบ ไม่ต้องทำอะไรกับอีเมลนี้</p>
+  <p style="color:#62798a">รหัสนี้ใช้ได้ 5 นาที และใช้ได้ครั้งเดียว หากคุณไม่ได้เป็นผู้ขอรหัสนี้ ไม่ต้องทำอะไรกับอีเมลนี้</p>
 </div>`,
     }),
   })
