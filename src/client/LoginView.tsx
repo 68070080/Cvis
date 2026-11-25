@@ -1,17 +1,19 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import {
   MIN_PASSWORD,
   isEmail,
   normalizeEmail,
   passwordMatches,
+  readAccount,
   saveAccount,
+  type AuthUser,
   type LocalAccount,
 } from './account'
-import { sendOtp, verifyOtp, type AuthUser } from './auth'
 
-const seconds = (value: number) => `${value} วินาที`
-
-/** Sign-up (e-mail + password, confirmed by OTP) or sign-in with the password. */
+/**
+ * Sign-up with an e-mail and a password, sign-in with the password, and a
+ * password reset — all checked in this browser, no e-mail is ever sent.
+ */
 export function LoginView({
   account,
   onSignedIn,
@@ -19,31 +21,16 @@ export function LoginView({
   account: LocalAccount | null
   onSignedIn: (user: AuthUser) => void
 }) {
-  const [step, setStep] = useState<'login' | 'signup' | 'code' | 'reset'>(
+  const [step, setStep] = useState<'login' | 'signup' | 'reset'>(
     account ? 'login' : 'signup',
   )
   const [email, setEmail] = useState(account?.email ?? '')
   const [password, setPassword] = useState('')
   const [confirm, setConfirm] = useState('')
-  const [code, setCode] = useState('')
-  const [devCode, setDevCode] = useState('')
-  const [note, setNote] = useState('')
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
-  const [cooldown, setCooldown] = useState(0)
-  /** What to finish once the code from the e-mail is accepted. */
-  const [intent, setIntent] = useState<'signup' | 'reset'>('signup')
 
-  useEffect(() => {
-    if (cooldown <= 0) return
-    const timer = window.setInterval(
-      () => setCooldown((value) => (value > 0 ? value - 1 : 0)),
-      1000,
-    )
-    return () => window.clearInterval(timer)
-  }, [cooldown])
-
-  function passwordProblem(): string {
+  function passwordProblem() {
     if (password.length < MIN_PASSWORD) {
       return `รหัสผ่านต้องมีอย่างน้อย ${MIN_PASSWORD} ตัวอักษร`
     }
@@ -51,30 +38,22 @@ export function LoginView({
     return ''
   }
 
-  async function requestCode(address: string): Promise<boolean> {
-    setBusy(true)
-    setError('')
-    try {
-      const result = await sendOtp(address)
-      setDevCode(result.devCode ?? '')
-      setNote(`ส่งรหัส 6 หลักไปที่ ${result.email} แล้ว ใช้ได้ 5 นาที`)
-      setCooldown(30)
-      return true
-    } catch (problem) {
-      setError(problem instanceof Error ? problem.message : 'ขอรหัสไม่สำเร็จ')
-      return false
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  async function startVerification(next: 'signup' | 'reset') {
+  async function signUp(event: React.FormEvent) {
+    event.preventDefault()
     const address = normalizeEmail(email)
     if (!isEmail(address)) return setError('กรุณากรอกอีเมลให้ถูกต้อง')
     const problem = passwordProblem()
     if (problem) return setError(problem)
-    setIntent(next)
-    if (await requestCode(address)) setStep('code')
+    setBusy(true)
+    setError('')
+    try {
+      const saved = await saveAccount(address, password)
+      onSignedIn({ email: saved.email })
+    } catch (issue) {
+      setError(issue instanceof Error ? issue.message : 'สร้างบัญชีไม่สำเร็จ')
+    } finally {
+      setBusy(false)
+    }
   }
 
   async function signIn(event: React.FormEvent) {
@@ -90,24 +69,29 @@ export function LoginView({
         return setError('รหัสผ่านไม่ถูกต้อง')
       }
       onSignedIn({ email: account.email })
-    } catch (problem) {
-      setError(problem instanceof Error ? problem.message : 'เข้าสู่ระบบไม่สำเร็จ')
+    } catch (issue) {
+      setError(issue instanceof Error ? issue.message : 'เข้าสู่ระบบไม่สำเร็จ')
     } finally {
       setBusy(false)
     }
   }
 
-  async function confirmCode(event: React.FormEvent) {
+  async function resetPassword(event: React.FormEvent) {
     event.preventDefault()
-    if (!/^\d{6}$/.test(code)) return setError('กรอกรหัส OTP 6 หลัก')
+    const current = await readAccount().catch(() => null)
+    if (!current) return setError('ยังไม่มีบัญชีในเครื่องนี้ กรุณาสร้างบัญชีใหม่')
+    if (normalizeEmail(email) !== current.email) {
+      return setError('อีเมลนี้ไม่ตรงกับบัญชีที่สร้างไว้ในเครื่องนี้')
+    }
+    const problem = passwordProblem()
+    if (problem) return setError(problem)
     setBusy(true)
     setError('')
     try {
-      const result = await verifyOtp(code)
-      const saved = await saveAccount(result.email, password)
+      const saved = await saveAccount(current.email, password)
       onSignedIn({ email: saved.email })
-    } catch (problem) {
-      setError(problem instanceof Error ? problem.message : 'ยืนยันรหัสไม่สำเร็จ')
+    } catch (issue) {
+      setError(issue instanceof Error ? issue.message : 'ตั้งรหัสผ่านใหม่ไม่สำเร็จ')
     } finally {
       setBusy(false)
     }
@@ -115,52 +99,60 @@ export function LoginView({
 
   const back = (next: 'login' | 'signup' | 'reset') => {
     setError('')
-    setNote('')
-    setDevCode('')
-    setCode('')
     setPassword('')
     setConfirm('')
     setStep(next)
   }
 
-  const addressFields = (autocomplete: string) => (
+  const passwordFields = (autoComplete: string) => (
     <>
       <div className="field">
-        <label htmlFor="account-email">อีเมล</label>
-        <input
-          id="account-email"
-          type="email"
-          inputMode="email"
-          autoComplete={autocomplete}
-          autoCapitalize="none"
-          spellCheck={false}
-          value={email}
-          placeholder="you@example.com"
-          onChange={(event) => setEmail(event.target.value)}
-        />
-      </div>
-      <div className="field">
-        <label htmlFor="account-password">รหัสผ่าน</label>
+        <label htmlFor="account-password">
+          {autoComplete === 'current-password' ? 'รหัสผ่าน' : 'รหัสผ่านใหม่'}
+        </label>
         <input
           id="account-password"
           type="password"
-          autoComplete="new-password"
+          autoComplete={autoComplete}
           value={password}
-          placeholder={`อย่างน้อย ${MIN_PASSWORD} ตัวอักษร`}
+          placeholder={
+            autoComplete === 'current-password'
+              ? undefined
+              : `อย่างน้อย ${MIN_PASSWORD} ตัวอักษร`
+          }
           onChange={(event) => setPassword(event.target.value)}
         />
       </div>
-      <div className="field">
-        <label htmlFor="account-confirm">ยืนยันรหัสผ่าน</label>
-        <input
-          id="account-confirm"
-          type="password"
-          autoComplete="new-password"
-          value={confirm}
-          onChange={(event) => setConfirm(event.target.value)}
-        />
-      </div>
+      {autoComplete !== 'current-password' && (
+        <div className="field">
+          <label htmlFor="account-confirm">ยืนยันรหัสผ่าน</label>
+          <input
+            id="account-confirm"
+            type="password"
+            autoComplete="new-password"
+            value={confirm}
+            onChange={(event) => setConfirm(event.target.value)}
+          />
+        </div>
+      )}
     </>
+  )
+
+  const emailField = (autoComplete: string) => (
+    <div className="field">
+      <label htmlFor="account-email">อีเมล</label>
+      <input
+        id="account-email"
+        type="email"
+        inputMode="email"
+        autoComplete={autoComplete}
+        autoCapitalize="none"
+        spellCheck={false}
+        value={email}
+        placeholder="you@example.com"
+        onChange={(event) => setEmail(event.target.value)}
+      />
+    </div>
   )
 
   return (
@@ -187,29 +179,8 @@ export function LoginView({
           <p className="muted small">
             บัญชีในเครื่องนี้: <strong>{account.email}</strong>
           </p>
-          <div className="field">
-            <label htmlFor="login-email">อีเมล</label>
-            <input
-              id="login-email"
-              type="email"
-              inputMode="email"
-              autoComplete="username"
-              autoCapitalize="none"
-              spellCheck={false}
-              value={email}
-              onChange={(event) => setEmail(event.target.value)}
-            />
-          </div>
-          <div className="field">
-            <label htmlFor="login-password">รหัสผ่าน</label>
-            <input
-              id="login-password"
-              type="password"
-              autoComplete="current-password"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-            />
-          </div>
+          {emailField('username')}
+          {passwordFields('current-password')}
           <button type="submit" className="primary wide" disabled={busy}>
             {busy ? 'กำลังตรวจสอบ…' : 'เข้าสู่ระบบ'}
           </button>
@@ -218,7 +189,10 @@ export function LoginView({
               type="button"
               className="linkbtn"
               disabled={busy}
-              onClick={() => back('reset')}
+              onClick={() => {
+                setEmail(account.email)
+                back('reset')
+              }}
             >
               ลืมรหัสผ่าน?
             </button>
@@ -226,23 +200,17 @@ export function LoginView({
         </form>
       )}
 
-      {(step === 'signup' || step === 'reset') && (
-        <form
-          className="card"
-          onSubmit={(event) => {
-            event.preventDefault()
-            void startVerification(step === 'reset' ? 'reset' : 'signup')
-          }}
-        >
-          <h2>{step === 'reset' ? 'ตั้งรหัสผ่านใหม่' : 'สร้างบัญชี'}</h2>
+      {step === 'signup' && (
+        <form className="card" onSubmit={signUp}>
+          <h2>สร้างบัญชี</h2>
           <p className="muted small">
-            {step === 'reset'
-              ? 'ยืนยันอีเมลด้วยรหัส OTP แล้วตั้งรหัสผ่านใหม่สำหรับบัญชีในเครื่องนี้'
-              : 'สมัครด้วยอีเมลและรหัสผ่าน แล้วยืนยันอีเมลด้วยรหัส OTP ที่ส่งไปให้'}
+            บัญชีนี้ใช้ปลดล็อกแอพในเบราว์เซอร์นี้เท่านั้น ไม่มีการส่งอีเมล
+            และไม่มีข้อมูลใดถูกอัปโหลดขึ้นเซิร์ฟเวอร์
           </p>
-          {addressFields(step === 'reset' ? 'username' : 'email')}
+          {emailField('email')}
+          {passwordFields('new-password')}
           <button type="submit" className="primary wide" disabled={busy}>
-            {busy ? 'กำลังส่งรหัส…' : 'รับรหัส OTP'}
+            {busy ? 'กำลังสร้างบัญชี…' : 'สร้างบัญชี'}
           </button>
           <div className="loginlinks">
             {account && (
@@ -259,65 +227,26 @@ export function LoginView({
         </form>
       )}
 
-      {step === 'code' && (
-        <form className="card" onSubmit={confirmCode}>
-          <h2>ยืนยันอีเมลด้วย OTP</h2>
+      {step === 'reset' && (
+        <form className="card" onSubmit={resetPassword}>
+          <h2>ตั้งรหัสผ่านใหม่</h2>
           <p className="muted small">
-            รหัส 6 หลักส่งไปที่ <strong>{normalizeEmail(email)}</strong> —
-            ใช้ได้ 5 นาที และใช้ได้ครั้งเดียว
+            ตั้งรหัสผ่านใหม่ให้บัญชีในเครื่องนี้ — ข้อมูลเดิมยังอยู่ครบ
+            และไม่ต้องยืนยันทางอีเมล
           </p>
-          <div className="field">
-            <label htmlFor="otp-code">รหัส OTP</label>
-            <input
-              id="otp-code"
-              className="otpinput"
-              inputMode="numeric"
-              autoComplete="one-time-code"
-              maxLength={6}
-              placeholder="000000"
-              value={code}
-              onChange={(event) =>
-                setCode(event.target.value.replace(/\D/g, '').slice(0, 6))
-              }
-            />
-          </div>
-          {devCode && (
-            <p className="muted small" role="status">
-              โหมดทดสอบในเครื่อง (ไม่ได้ส่งอีเมลจริง): รหัสคือ {devCode}
-            </p>
-          )}
-          {note && (
-            <p className="muted small" role="status">
-              {note}
-            </p>
-          )}
-          <button
-            type="submit"
-            className="primary wide"
-            disabled={busy || code.length !== 6}
-          >
-            {busy
-              ? 'กำลังตรวจสอบ…'
-              : intent === 'reset'
-                ? 'ยืนยันและตั้งรหัสใหม่'
-                : 'ยืนยันและสร้างบัญชี'}
+          {emailField('username')}
+          {passwordFields('new-password')}
+          <button type="submit" className="primary wide" disabled={busy}>
+            {busy ? 'กำลังบันทึก…' : 'บันทึกรหัสผ่านใหม่'}
           </button>
           <div className="loginlinks">
             <button
               type="button"
               className="linkbtn"
-              disabled={busy || cooldown > 0}
-              onClick={() => void requestCode(normalizeEmail(email))}
-            >
-              {cooldown > 0 ? `ส่งอีกครั้งใน ${seconds(cooldown)}` : 'ส่งรหัสอีกครั้ง'}
-            </button>
-            <button
-              type="button"
-              className="linkbtn"
               disabled={busy}
-              onClick={() => back(intent === 'reset' ? 'reset' : 'signup')}
+              onClick={() => back(account ? 'login' : 'signup')}
             >
-              แก้อีเมล
+              {account ? 'กลับไปเข้าสู่ระบบ' : 'กลับไปสร้างบัญชี'}
             </button>
           </div>
         </form>

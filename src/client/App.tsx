@@ -6,9 +6,8 @@ import type {
   SettingsInput,
   TransactionInput,
 } from '../shared/types'
-import { readAccount, type LocalAccount } from './account'
+import { readAccount, type AuthUser, type LocalAccount } from './account'
 import { api, jsonRequest } from './api'
-import type { AuthUser } from './auth'
 import { importBackup } from './backup'
 import { BudgetsView } from './BudgetsView'
 import { currentMonth } from './format'

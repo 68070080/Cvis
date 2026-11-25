@@ -1,5 +1,8 @@
 import { get, writeAll } from './localstore'
 
+/** The signed-in user, as the UI needs it. */
+export type AuthUser = { email: string }
+
 /** The one account for this browser: an e-mail and its password verifier. */
 export type LocalAccount = {
   email: string
@@ -71,9 +74,9 @@ export async function readAccount(): Promise<LocalAccount | null> {
 }
 
 /**
- * Stores the account, or replaces its password when the address was just
- * verified again. The record lives in IndexedDB next to the data it protects
- * and is deliberately left out of the JSON backup.
+ * Stores the account, or replaces its password on a reset. The record lives in
+ * IndexedDB next to the data it protects and is deliberately left out of the
+ * JSON backup. Nothing about it is sent to a server.
  */
 export async function saveAccount(
   email: string,
@@ -81,12 +84,16 @@ export async function saveAccount(
 ): Promise<LocalAccount> {
   const salt = toBase64(crypto.getRandomValues(new Uint8Array(16)))
   const now = Date.now()
+  const previous = await readAccount().catch(() => null)
   const account: LocalAccount = {
     email: normalizeEmail(email),
     salt,
     hash: await derive(password, salt, ITERATIONS),
     iterations: ITERATIONS,
-    createdAt: now,
+    createdAt:
+      previous && previous.email === normalizeEmail(email)
+        ? previous.createdAt
+        : now,
     verifiedAt: now,
   }
   await writeAll([
