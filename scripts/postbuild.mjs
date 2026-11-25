@@ -1,5 +1,6 @@
 import { readdirSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 // The uploader accepts dedicated public output, without metadata/source maps.
 function clean(dir) {
@@ -10,4 +11,4 @@ function clean(dir) {
     else if (entry.isDirectory()) clean(path)
   }
 }
-clean(new URL('../dist', import.meta.url).pathname)
+clean(fileURLToPath(new URL('../dist', import.meta.url)))

@@ -7,6 +7,7 @@ import type {
   TransactionInput,
 } from '../shared/types'
 import { api, jsonRequest } from './api'
+import { importBackup } from './backup'
 import { BudgetsView } from './BudgetsView'
 import { currentMonth } from './format'
 import { FitnessModule } from './FitnessModule'
@@ -145,6 +146,11 @@ export function App() {
   const saveSettings = (input: SettingsInput) =>
     mutate(() => api('/api/settings', jsonRequest('PATCH', input)))
 
+  const restore = async (text: string) => {
+    await importBackup(text)
+    await load(month)
+  }
+
   return (
     <div className="app">
       {error && (
@@ -183,7 +189,9 @@ export function App() {
         <>
           <main>
             {session.mode === 'local' && (
-              <p className="localnote">โหมดทดลองในเครื่อง — ข้อมูลเก็บในเครื่องนี้</p>
+              <p className="localnote">
+                ข้อมูลเก็บไว้ในเบราว์เซอร์นี้เท่านั้น — สำรองข้อมูลได้ในหน้าตั้งค่า
+              </p>
             )}
             <div className="topbar">
               <div
@@ -227,6 +235,7 @@ export function App() {
                 session={session}
                 busy={busy}
                 onSave={saveSettings}
+                onRestore={restore}
               />
             ) : mod === 'finance' ? (
               <>

@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { AppData, Session, SettingsInput, Theme } from '../shared/types'
+import { downloadBackup } from './backup'
 import { DEFAULT_THEME, applyTheme, isHexColor } from './theme'
 
 /** Water goal slider limits, in millilitres. */
@@ -18,11 +19,13 @@ export function SettingsView({
   data,
   session,
   onSave,
+  onRestore,
   busy,
 }: {
   data: AppData
   session: Session
   onSave: (input: SettingsInput) => Promise<void>
+  onRestore: (text: string) => Promise<void>
   busy: boolean
 }) {
   const [name, setName] = useState(data.settings.displayName)
@@ -32,6 +35,9 @@ export function SettingsView({
   )
   const [theme, setTheme] = useState<Theme>(data.settings.theme)
   const [error, setError] = useState('')
+  const [backupNote, setBackupNote] = useState('')
+  const [backupBusy, setBackupBusy] = useState(false)
+  const fileRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     setName(data.settings.displayName)
@@ -60,6 +66,42 @@ export function SettingsView({
     const next = value.toLowerCase()
     setTheme((current) => ({ ...current, [key]: next }))
     if (isHexColor(next)) applyTheme({ ...theme, [key]: next })
+  }
+
+  async function backup() {
+    setBackupNote('')
+    try {
+      await downloadBackup()
+      setBackupNote('ดาวน์โหลดไฟล์สำรองแล้ว — เก็บไว้ในที่ปลอดภัย')
+    } catch (problem) {
+      setBackupNote(
+        problem instanceof Error ? problem.message : 'สำรองข้อมูลไม่สำเร็จ',
+      )
+    }
+  }
+
+  async function restore(file: File) {
+    if (
+      !window.confirm(
+        'นำเข้าข้อมูลสำรองจะแทนที่ข้อมูลทั้งหมดในเครื่องนี้ ดำเนินการต่อหรือไม่?',
+      )
+    ) {
+      if (fileRef.current) fileRef.current.value = ''
+      return
+    }
+    setBackupBusy(true)
+    setBackupNote('')
+    try {
+      await onRestore(await file.text())
+      setBackupNote('นำเข้าข้อมูลสำรองเรียบร้อยแล้ว')
+    } catch (problem) {
+      setBackupNote(
+        problem instanceof Error ? problem.message : 'นำเข้าข้อมูลไม่สำเร็จ',
+      )
+    } finally {
+      setBackupBusy(false)
+      if (fileRef.current) fileRef.current.value = ''
+    }
   }
 
   async function submit(event: React.FormEvent) {
@@ -185,6 +227,42 @@ export function SettingsView({
           <span style={{ background: theme.expense }} />
           <span style={{ background: theme.income }} />
         </div>
+      </section>
+
+      <section className="card">
+        <h2>สำรองข้อมูล</h2>
+        <p className="muted small">
+          ข้อมูลทั้งหมดอยู่ในเบราว์เซอร์นี้เท่านั้น — แนะนำให้ดาวน์โหลดไฟล์สำรอง
+          เก็บไว้ก่อนล้างข้อมูลเบราว์เซอร์ เปลี่ยนเครื่อง หรือย้ายไปเครื่องอื่น
+        </p>
+        <div className="backupactions">
+          <button type="button" className="ghost wide" onClick={backup}>
+            ดาวน์โหลดไฟล์สำรอง (.json)
+          </button>
+          <button
+            type="button"
+            className="ghost wide"
+            disabled={backupBusy}
+            onClick={() => fileRef.current?.click()}
+          >
+            {backupBusy ? 'กำลังนำเข้า…' : 'นำเข้าไฟล์สำรอง'}
+          </button>
+          <input
+            ref={fileRef}
+            type="file"
+            accept="application/json,.json"
+            hidden
+            onChange={(event) => {
+              const file = event.target.files?.[0]
+              if (file) void restore(file)
+            }}
+          />
+        </div>
+        {backupNote && (
+          <p className="muted small" role="status">
+            {backupNote}
+          </p>
+        )}
       </section>
 
       {error && (

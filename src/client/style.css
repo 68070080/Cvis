@@ -566,6 +566,12 @@ input.hex {
   border: 1px solid rgba(0, 0, 0, 0.06);
 }
 
+.backupactions {
+  display: grid;
+  gap: 8px;
+  margin: 10px 0;
+}
+
 .signout {
   margin-top: 10px;
 }
